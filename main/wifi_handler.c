@@ -25,8 +25,8 @@ static void timer_send_deauth_frame(void *arg){
 }
 
 // Your STA credentials
-const char* sta_ssid = "-----";
-const char* sta_pass = "----";
+const char* sta_ssid = "SwathiWifo";
+const char* sta_pass = "Password1234";
 
 static attack_status_t attack_status = { .state = READY, .type = -1, .content_size = 0, .content = NULL };
 
@@ -158,7 +158,14 @@ if (aprec == NULL) {
 
 attack_config.ap_record = aprec;
     if (attack_config.ap_record == NULL) {
-        ESP_LOGE(TAG, "handle_deauth_request: invalid ap_record_id %u", attack_request->bssid);
+        ESP_LOGE(TAG,
+    "handle_deauth_request: invalid ap_record_id BSSID %02X:%02X:%02X:%02X:%02X:%02X",
+    attack_request->bssid[0],
+    attack_request->bssid[1],
+    attack_request->bssid[2],
+    attack_request->bssid[3],
+    attack_request->bssid[4],
+    attack_request->bssid[5]);
         return;
     }
 

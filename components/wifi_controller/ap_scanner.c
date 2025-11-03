@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "esp_err.h"
 #include "esp_wifi.h"
+#include <string.h>
+
 
 static const char* TAG = "wifi_controller/ap_scanner";
 static wifictl_ap_records_t ap_records;
