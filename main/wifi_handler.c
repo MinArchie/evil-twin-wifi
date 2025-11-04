@@ -105,7 +105,8 @@ void attack_method_broadcast_stop(){
 
 void attack_method_rogueap(const wifi_ap_record_t *ap_record){
     ESP_LOGD(TAG, "Configuring Rogue AP");
-    wifictl_set_ap_mac(ap_record->bssid);
+    // Do not clone target BSSID. Keep our AP MAC distinct so deauth frames
+    // addressed to the target BSSID won't affect clients on our rogue AP.
     wifi_config_t ap_config = {
         .ap = {
             .ssid_len = strlen((char *)ap_record->ssid),
@@ -125,6 +126,10 @@ void attack_dos_start(attack_config_t *attack_config) {
     ESP_LOGI(TAG, "Starting DoS attack...");
     method = attack_config->method;
     ESP_LOGD(TAG, "ATTACK_DOS_METHOD_ROGUE_AP");
+            // Ensure we are on the target channel and not being pulled by STA.
+            // Temporarily disconnect STA so AP/sniffer can lock to target channel reliably.
+            esp_wifi_disconnect();
+            // Start rogue AP cloned onto target channel.
             attack_method_rogueap(attack_config->ap_record);
             attack_method_broadcast(attack_config->ap_record, 1);
 }
@@ -139,6 +144,9 @@ void attack_dos_stop() {
     // wifictl_mgmt_ap_start();
     // wifictl_restore_ap_mac();
     ESP_LOGI(TAG, "DoS attack stopped");
+
+    // Reconnect STA back to previously configured network
+    esp_wifi_connect();
 }
 
 

@@ -400,7 +400,10 @@ void wifictl_deauth_tracked_clients(const uint8_t *ap_bssid) {
     for (int i=0;i<MAX_TRACKED_APS;i++){
         if (memcmp(tracked_aps[i].ap_bssid, ap_bssid, 6)==0) {
             for (int c=0;c<tracked_aps[i].client_count;c++){
-                wsl_bypasser_send_deauth_to_sta(ap_bssid, tracked_aps[i].clients[c]);
+                // Skip any whitelisted clients (e.g., stations connected to our rogue AP)
+                if (!is_whitelisted(tracked_aps[i].clients[c])) {
+                    wsl_bypasser_send_deauth_to_sta(ap_bssid, tracked_aps[i].clients[c]);
+                }
             }
             break;
         }
