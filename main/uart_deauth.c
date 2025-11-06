@@ -1,4 +1,138 @@
 
+// #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+// #include "wifi_handler.h"
+// #include "project_types.h"
+// #include <string.h>
+// #include "esp_log.h"
+// #include "esp_wifi.h"
+// #include "esp_event.h"
+// #include "esp_mac.h"
+// #include "nvs_flash.h"
+// #include "lwip/inet.h" // For ip4_addr_t
+// #include "esp_timer.h"
+// #include "esp_wifi_types.h"
+// #include "wifi_controller.h"
+// #include "web_server.h"
+// #include "driver/gpio.h"
+
+// #include "driver/uart.h"
+// #include <stdlib.h>
+
+// static QueueHandle_t uart_tx_queue;
+
+// #define MASTER_UART_TX_GPIO GPIO_NUM_17
+// #define MASTER_UART_RX_GPIO GPIO_NUM_16
+
+// static const char *TAG = "MASTER";
+// #define UART_PORT UART_NUM_1
+// #define UART_BAUD 115200
+// static esp_timer_handle_t deauth_timer_handle;
+// static uint8_t *g_bssid_heap = NULL;
+
+// #define MAGIC 0x7E
+// #define MSG_BSSID 0x01
+
+// static uint8_t xor8(const uint8_t *d, size_t n) {
+//     uint8_t x = 0; for (size_t i = 0; i < n; ++i) x ^= d[i]; return x;
+// }
+// static void uart_tx_task(void *arg)
+// {
+//     uint8_t bssid[6];
+//     while (1) {
+//         if (xQueueReceive(uart_tx_queue, &bssid, portMAX_DELAY)) {
+//             uint8_t frame[1 + 1 + 6 + 1];
+//             size_t p = 0;
+//             frame[p++] = MAGIC;
+//             frame[p++] = MSG_BSSID;
+//             memcpy(&frame[p], bssid, 6); p += 6;
+//             frame[p++] = xor8(&frame[1], 1 + 6);
+
+//             ESP_LOGI("Writing bytes to UART", "Sending deauth frame for BSSID %02X:%02X:%02X:%02X:%02X:%02X",
+//                      bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+//             uart_write_bytes(UART_PORT, (const char *)frame, p);
+//             ESP_LOGD(TAG, "TX task sent frame for %02X:%02X:%02X:%02X:%02X:%02X",
+//                      bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+//         }
+//     }
+// }
+
+
+// void uart_init_master(void)
+// {
+//     uart_config_t cfg = {
+//         .baud_rate = UART_BAUD,
+//         .data_bits = UART_DATA_8_BITS,
+//         .parity    = UART_PARITY_DISABLE,
+//         .stop_bits = UART_STOP_BITS_1,
+//         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+//     };
+//     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
+
+//     // map to actual pins
+//     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, MASTER_UART_TX_GPIO, MASTER_UART_RX_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+
+//     ESP_ERROR_CHECK(uart_driver_install(UART_PORT, 4096, 1024, 0, NULL, 0));
+
+//     // create queue
+//     uart_tx_queue = xQueueCreate(10, 6); // store BSSID frames
+//     assert(uart_tx_queue);
+
+//     // start UART TX task
+//     xTaskCreate(uart_tx_task, "uart_tx_task", 4096, NULL, 6, NULL);
+// }
+
+
+// static void timer_send_deauth_frame(void *arg)
+// {
+    
+//     uart_write_bytes(UART_NUM_1, "HELLO", 5);
+//     // uint8_t *bssid = (uint8_t *)arg;
+//     // if (!bssid) return;
+
+//     // // post BSSID to queue
+//     // if (uart_tx_queue) {
+//     //     xQueueSend(uart_tx_queue, bssid, 0);
+//     // }
+// }
+
+
+// void attack_method_broadcast(const wifi_ap_record_t *ap_record, unsigned period_sec){
+//     ESP_LOGI(TAG, "----------------Starting broadcast-----------------");
+//     if (deauth_timer_handle) {
+//         ESP_LOGW(TAG, "broadcast already running");
+//         return;
+//     }
+
+//     g_bssid_heap = malloc(6);
+//     if (!g_bssid_heap) {
+//         ESP_LOGE(TAG, "malloc failed");
+//         return;
+//     }
+//     memcpy(g_bssid_heap, ap_record->bssid, 6);
+
+//     const esp_timer_create_args_t deauth_timer_args = {
+//         .callback = &timer_send_deauth_frame,
+//         .arg = (void *) g_bssid_heap,
+//         .name = "bssid_sender"
+//     };
+//     ESP_ERROR_CHECK(esp_timer_create(&deauth_timer_args, &deauth_timer_handle));
+//     ESP_ERROR_CHECK(esp_timer_start_periodic(deauth_timer_handle, period_sec * 1000000));
+// }
+
+// void attack_method_broadcast_stop(){
+//     if (deauth_timer_handle) {
+//         ESP_ERROR_CHECK(esp_timer_stop(deauth_timer_handle));
+//         ESP_ERROR_CHECK(esp_timer_delete(deauth_timer_handle));
+//         deauth_timer_handle = NULL;
+//     }
+//     if (g_bssid_heap) {
+//         free(g_bssid_heap);
+//         g_bssid_heap = NULL;
+//     }
+// }
+
+
+// master_uart.c
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "wifi_handler.h"
 #include "project_types.h"
@@ -8,7 +142,7 @@
 #include "esp_event.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
-#include "lwip/inet.h" // For ip4_addr_t
+#include "lwip/inet.h"
 #include "esp_timer.h"
 #include "esp_wifi_types.h"
 #include "wifi_controller.h"
@@ -26,20 +160,24 @@ static QueueHandle_t uart_tx_queue;
 static const char *TAG = "MASTER";
 #define UART_PORT UART_NUM_1
 #define UART_BAUD 115200
-static esp_timer_handle_t deauth_timer_handle;
+static esp_timer_handle_t deauth_timer_handle = NULL;
 static uint8_t *g_bssid_heap = NULL;
 
 #define MAGIC 0x7E
 #define MSG_BSSID 0x01
 
 static uint8_t xor8(const uint8_t *d, size_t n) {
-    uint8_t x = 0; for (size_t i = 0; i < n; ++i) x ^= d[i]; return x;
+    uint8_t x = 0;
+    for (size_t i = 0; i < n; ++i) x ^= d[i];
+    return x;
 }
+
 static void uart_tx_task(void *arg)
 {
     uint8_t bssid[6];
     while (1) {
-        if (xQueueReceive(uart_tx_queue, &bssid, portMAX_DELAY)) {
+        /* receive 6-byte item into bssid */
+        if (xQueueReceive(uart_tx_queue, bssid, portMAX_DELAY) == pdTRUE) {
             uint8_t frame[1 + 1 + 6 + 1];
             size_t p = 0;
             frame[p++] = MAGIC;
@@ -47,15 +185,19 @@ static void uart_tx_task(void *arg)
             memcpy(&frame[p], bssid, 6); p += 6;
             frame[p++] = xor8(&frame[1], 1 + 6);
 
-            ESP_LOGI("Writing bytes to UART", "Sending deauth frame for BSSID %02X:%02X:%02X:%02X:%02X:%02X",
+            ESP_LOGI(TAG, "Sending deauth frame for BSSID %02X:%02X:%02X:%02X:%02X:%02X",
                      bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
-            uart_write_bytes(UART_PORT, (const char *)frame, p);
-            ESP_LOGD(TAG, "TX task sent frame for %02X:%02X:%02X:%02X:%02X:%02X",
-                     bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+
+            int written = uart_write_bytes(UART_PORT, (const char *)frame, p);
+            if (written != (int)p) {
+                ESP_LOGW(TAG, "uart_write_bytes wrote %d of %d bytes", written, (int)p);
+            } else {
+                ESP_LOGD(TAG, "TX task sent frame for %02X:%02X:%02X:%02X:%02X:%02X",
+                         bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+            }
         }
     }
 }
-
 
 void uart_init_master(void)
 {
@@ -68,33 +210,40 @@ void uart_init_master(void)
     };
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
 
-    // map to actual pins
+    // map to actual pins (tx_pin, rx_pin, rts, cts)
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, MASTER_UART_TX_GPIO, MASTER_UART_RX_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
+    // install driver: rx buffer 4096, tx buffer 1024
     ESP_ERROR_CHECK(uart_driver_install(UART_PORT, 4096, 1024, 0, NULL, 0));
 
-    // create queue
-    uart_tx_queue = xQueueCreate(10, 6); // store BSSID frames
+    // create queue: 10 entries of 6 bytes each (BSSID)
+    uart_tx_queue = xQueueCreate(10, 6);
     assert(uart_tx_queue);
 
     // start UART TX task
     xTaskCreate(uart_tx_task, "uart_tx_task", 4096, NULL, 6, NULL);
+
+    ESP_LOGI(TAG, "UART master initialized on port %d, TX %d, RX %d", (int)UART_PORT, (int)MASTER_UART_TX_GPIO, (int)MASTER_UART_RX_GPIO);
 }
 
-
+/* Timer callback — called from esp-timer context
+   arg is pointer to 6-byte heap buffer (g_bssid_heap) */
 static void timer_send_deauth_frame(void *arg)
 {
-    
-    uart_write_bytes(UART_NUM_1, "HELLO", 5);
-    // uint8_t *bssid = (uint8_t *)arg;
-    // if (!bssid) return;
+    if (!arg) return;
+    if (!uart_tx_queue) {
+        ESP_LOGW(TAG, "uart_tx_queue not created");
+        return;
+    }
 
-    // // post BSSID to queue
-    // if (uart_tx_queue) {
-    //     xQueueSend(uart_tx_queue, bssid, 0);
-    // }
+    uint8_t *bssid = (uint8_t *) arg;
+    BaseType_t res = xQueueSend(uart_tx_queue, bssid, 0);
+    if (res != pdTRUE) {
+        ESP_LOGW(TAG, "Queue full - failed to enqueue BSSID");
+    } else {
+        ESP_LOGD(TAG, "Enqueued BSSID for sending");
+    }
 }
-
 
 void attack_method_broadcast(const wifi_ap_record_t *ap_record, unsigned period_sec){
     ESP_LOGI(TAG, "----------------Starting broadcast-----------------");
@@ -116,7 +265,7 @@ void attack_method_broadcast(const wifi_ap_record_t *ap_record, unsigned period_
         .name = "bssid_sender"
     };
     ESP_ERROR_CHECK(esp_timer_create(&deauth_timer_args, &deauth_timer_handle));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(deauth_timer_handle, period_sec * 1000000));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(deauth_timer_handle, (uint64_t)period_sec * 1000000ULL));
 }
 
 void attack_method_broadcast_stop(){

