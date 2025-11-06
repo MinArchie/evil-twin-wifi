@@ -9,20 +9,15 @@
 #include "esp_mac.h"
 #include "nvs_flash.h"
 #include "lwip/inet.h" // For ip4_addr_t
-#include "wsl_bypasser.h"
 #include "esp_timer.h"
 #include "esp_wifi_types.h"
 #include "wifi_controller.h"
-#include "deauth.h"
 #include "web_server.h"
+#include "uart_deauth.h"
 
 
 static const char* TAG = "WIFI_HANDLER";
-static esp_timer_handle_t deauth_timer_handle;
-
-static void timer_send_deauth_frame(void *arg){
-    wsl_bypasser_send_deauth_frame((wifi_ap_record_t *) arg);
-}
+// static esp_timer_handle_t deauth_timer_handle;
 
 // Your STA credentials
 const char* sta_ssid = "SwathiWifo";
@@ -72,24 +67,9 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void attack_method_broadcast(const wifi_ap_record_t *ap_record, unsigned period_sec){
-    ESP_LOGI(TAG, "----------------Starting broadcast-----------------");
-    const esp_timer_create_args_t deauth_timer_args = {
-        .callback = &timer_send_deauth_frame,
-        .arg = (void *) ap_record
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&deauth_timer_args, &deauth_timer_handle));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(deauth_timer_handle, period_sec * 1000000));
-}
-
-void attack_method_broadcast_stop(){
-    ESP_ERROR_CHECK(esp_timer_stop(deauth_timer_handle));
-    esp_timer_delete(deauth_timer_handle);
-}
-
 void attack_method_rogueap(const wifi_ap_record_t *ap_record){
     ESP_LOGD(TAG, "Configuring Rogue AP");
-    wifictl_set_ap_mac(ap_record->bssid);
+    // wifictl_set_ap_mac(ap_record->bssid);
     wifi_config_t ap_config = {
         .ap = {
             .ssid_len = strlen((char *)ap_record->ssid),

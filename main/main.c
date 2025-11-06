@@ -6,6 +6,7 @@
 #include "wifi_handler.h"
 #include "web_server.h"
 #include "esp_event.h"
+#include "uart_deauth.h"
 
 static const char* TAG = "MAIN";
 
@@ -20,6 +21,7 @@ void app_main(void)
     ESP_LOGI(TAG, "TFLite model initialized.");
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
+    uart_init_master();
     wifi_init_ap_sta();
 
     start_webserver();
