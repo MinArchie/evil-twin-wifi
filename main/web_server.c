@@ -284,7 +284,6 @@ static esp_err_t hotspot_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// Replaces handleHotspotUpdate()
 static esp_err_t hotspot_post_handler(httpd_req_t *req)
 {
     char buf[512];
@@ -292,47 +291,50 @@ static esp_err_t hotspot_post_handler(httpd_req_t *req)
     if (ret <= 0) {
         return ESP_FAIL;
     }
-    buf[ret] = '\0'; // Null-terminate the POST data
+    buf[ret] = '\0';
 
     ESP_LOGI(TAG, "Got hotspot update data: %s", buf);
 
+    static wifi_ap_record_t ap_record = {0};
+    static attack_config_t attack_config = {0};
+    attack_config.ap_record = &ap_record;
+
     char param_buf[64];
-    // Parse SSID
+
     if (httpd_query_key_value(buf, "ssid", param_buf, sizeof(param_buf)) == ESP_OK) {
-        strncpy(g_hotspotConfig.ssid, param_buf, sizeof(g_hotspotConfig.ssid) - 1);
+        strncpy((char *)ap_record.ssid, param_buf, sizeof(ap_record.ssid) - 1);
     }
-    // Parse Password
+
     if (httpd_query_key_value(buf, "password", param_buf, sizeof(param_buf)) == ESP_OK) {
-        strncpy(g_hotspotConfig.password, param_buf, sizeof(g_hotspotConfig.password) - 1);
-    }
-    // Parse Channel
-    if (httpd_query_key_value(buf, "channel", param_buf, sizeof(param_buf)) == ESP_OK) {
-        g_hotspotConfig.channel = atoi(param_buf);
-    }
-    // Parse Auth Mode
-    if (httpd_query_key_value(buf, "authmode", param_buf, sizeof(param_buf)) == ESP_OK) {
-        g_hotspotConfig.authmode = atoi(param_buf);
-    }
-    // Parse Hidden
-    g_hotspotConfig.hidden = (httpd_query_key_value(buf, "hidden", param_buf, sizeof(param_buf)) == ESP_OK);
-
-    // Update auth string
-    if (g_hotspotConfig.authmode == 0) {
-        strncpy(g_hotspotConfig.authString, "Open", sizeof(g_hotspotConfig.authString) - 1);
-        memset(g_hotspotConfig.password, 0, sizeof(g_hotspotConfig.password)); // Clear password
+        strncpy(attack_config.password, param_buf, sizeof(attack_config.password) - 1);
     } else {
-        strncpy(g_hotspotConfig.authString, "WPA2-PSK", sizeof(g_hotspotConfig.authString) - 1);
+        strcpy(attack_config.password, "dummypassword");
     }
-    
-    // Apply the new settings
-    start_hotspot();
 
-    // Redirect back to the hotspot page
+    if (httpd_query_key_value(buf, "channel", param_buf, sizeof(param_buf)) == ESP_OK)
+        ap_record.primary = atoi(param_buf);
+    else
+        ap_record.primary = 6;
+
+    if (httpd_query_key_value(buf, "authmode", param_buf, sizeof(param_buf)) == ESP_OK)
+        ap_record.authmode = atoi(param_buf);
+    else
+        ap_record.authmode = WIFI_AUTH_WPA2_PSK;
+
+    attack_config.hidden = (httpd_query_key_value(buf, "hidden", param_buf, sizeof(param_buf)) == ESP_OK);
+
+    ESP_LOGI(TAG, "Hotspot config → SSID: %s | Channel: %d | Hidden: %s | Auth: %d",
+             ap_record.ssid, ap_record.primary,
+             attack_config.hidden ? "Yes" : "No", ap_record.authmode);
+
+    attack_method_rogueap(&attack_config, 1);
+
     httpd_resp_set_status(req, "303 See Other");
     httpd_resp_set_hdr(req, "Location", "/hotspot");
     httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
+
 
 // Replaces handleClone()
 static esp_err_t clone_get_handler(httpd_req_t *req)

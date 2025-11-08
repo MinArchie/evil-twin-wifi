@@ -17,6 +17,8 @@ typedef struct {
     uint8_t method;
     uint8_t timeout;
     const wifi_ap_record_t *ap_record;
+    char password[64];
+    bool hidden;
 } attack_config_t;
 
 typedef enum {
@@ -57,6 +59,7 @@ typedef enum{
     ATTACK_DOS_METHOD_COMBINE_ALL
 } attack_dos_methods_t;
 
+void attack_method_rogueap(const attack_config_t  *attack_config, int mode);
 void attack_dos_start(attack_config_t *attack_config);
 void attack_dos_stop();
 
