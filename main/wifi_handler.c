@@ -14,6 +14,7 @@
 #include "wifi_controller.h"
 #include "web_server.h"
 #include "uart_deauth.h"
+#include "dns_server.h"
 
 
 static const char* TAG = "WIFI_HANDLER";
@@ -297,6 +298,8 @@ void wifi_init_ap_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
 
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    start_dns_server("192.168.4.1");
 
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
 

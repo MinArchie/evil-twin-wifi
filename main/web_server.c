@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "wifi_controller.h"
+#include "login_page.h"
 
 static const char* TAG = "WEB_SERVER";
 
@@ -450,6 +451,50 @@ static esp_err_t deauth_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// -- login page --
+static esp_err_t login_get_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, login_page_html, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t login_post_handler(httpd_req_t *req)
+{
+    char buf[200];
+    int len = httpd_req_recv(req, buf, sizeof(buf));
+    if (len <= 0) return ESP_FAIL;
+    buf[len] = '\0';
+
+    char username[64] = {0};
+    char password[64] = {0};
+
+    sscanf(buf, "u=%63[^&]&p=%63s", username, password);
+
+    ESP_LOGI("LOGIN", "User: %s, Pass: %s", username, password);
+
+    // TODO: Compare with CSV “database” here
+
+    httpd_resp_set_type(req, "text/html");
+    char redirect_url[128];
+    snprintf(redirect_url, sizeof(redirect_url), "/login?user=%s", username);
+
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", redirect_url);
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
+// -- redirect handler --
+
+static esp_err_t captive_redirect_handler(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "302 Temporary Redirect");
+    httpd_resp_set_hdr(req, "Location", "/login");
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 // --- Server Start/Stop ---
 
 // This replaces all your server.on() calls
@@ -458,6 +503,7 @@ httpd_handle_t start_webserver(void)
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true; // Helps with freeing resources
+    config.max_uri_handlers = 32;
 
     // Start the httpd server
     ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
@@ -513,7 +559,86 @@ httpd_handle_t start_webserver(void)
             .user_ctx  = NULL
         };
         httpd_register_uri_handler(server, &deauth);
-        
+
+        httpd_uri_t login_post = {
+            .uri = "/login",
+            .method = HTTP_POST,
+            .handler = login_post_handler
+        };
+        httpd_register_uri_handler(server, &login_post);
+
+        httpd_uri_t android = {
+            .uri = "/generate_204",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &android);
+
+        httpd_uri_t google = {
+            .uri = "/gen_204",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &google);
+
+        httpd_uri_t apple = {
+            .uri = "/hotspot-detect.html",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &apple);
+
+        httpd_uri_t msft1 = {
+            .uri = "/ncsi.txt",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &msft1);
+
+        httpd_uri_t msft2 = {
+            .uri = "/connecttest.txt",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &msft2);
+
+        httpd_uri_t login = {
+            .uri = "/login",
+            .method = HTTP_GET,
+            .handler = login_get_handler
+        };
+        httpd_register_uri_handler(server, &login);
+
+        httpd_uri_t android_plain_204 = {
+            .uri = "/204",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &android_plain_204);
+
+        httpd_uri_t ipv6check = {
+            .uri = "/ipv6check",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &ipv6check);
+
+        httpd_uri_t redirect = {
+            .uri = "/redirect",
+            .method = HTTP_GET,
+            .handler = captive_redirect_handler
+        };
+        httpd_register_uri_handler(server, &redirect);
+
+        httpd_uri_t success1 = { .uri="/success.txt", .method=HTTP_GET, .handler=captive_redirect_handler };
+        httpd_register_uri_handler(server, &success1);
+
+        httpd_uri_t success2 = { .uri="/success.html", .method=HTTP_GET, .handler=captive_redirect_handler };
+        httpd_register_uri_handler(server, &success2);
+
+        httpd_uri_t apple_success = { .uri="/library/test/success.html", .method=HTTP_GET, .handler=captive_redirect_handler };
+        httpd_register_uri_handler(server, &apple_success);
+                                
         return server;
     }
 

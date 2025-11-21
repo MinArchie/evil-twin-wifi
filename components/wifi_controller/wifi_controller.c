@@ -62,6 +62,7 @@ static void wifi_init_apsta(){
     ESP_ERROR_CHECK(esp_wifi_get_mac(WIFI_IF_AP, original_mac_ap));
 
     ESP_ERROR_CHECK(esp_wifi_start());
+    // ESP_ERROR_CHECK(start_dns_server("192.168.4.1"));
     wifi_init = true;
     ESP_LOGI(TAG, "Wi-Fi initialization complete");
 }

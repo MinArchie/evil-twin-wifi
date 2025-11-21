@@ -1,7 +1,8 @@
 set(SOURCES "main.c"
             "wifi_handler.c"
             "web_server.c"
-            "uart_deauth.c")
+            "uart_deauth.c"
+            "dns_server.c")
 
 set(SOURCES_CXX "tflite_handler.cpp")
 
