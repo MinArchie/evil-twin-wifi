@@ -1,6 +1,7 @@
 
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "wifi_handler.h"
+#include "esp_spiffs.h"
 #include "project_types.h"
 #include <string.h>
 #include "esp_log.h"
@@ -262,6 +263,47 @@ void start_hotspot(void)
 }
 
 
+void init_fs() {
+    esp_vfs_spiffs_conf_t conf = {
+        .base_path = "/spiffs",
+        .partition_label = NULL,
+        .max_files = 5,
+        .format_if_mount_failed = true
+    };
+    ESP_ERROR_CHECK(esp_vfs_spiffs_register(&conf));
+    ESP_LOGI("FS", "SPIFFS mounted");
+}
+
+bool get_password_for_ssid(const char *ssid, char *out_password, size_t out_size)
+{
+    FILE *f = fopen("/spiffs/users.csv", "r");
+    if (!f) {
+        ESP_LOGE("CSV", "Failed to open /spiffs/users.csv");
+        return false;
+    }
+
+    char line[128];
+    fgets(line, sizeof(line), f); // Skip header
+
+    while (fgets(line, sizeof(line), f)) {
+        char s[64], p[64];
+
+        if (sscanf(line, "%63[^,],%63[^\n]", s, p) == 2) {
+            if (strcmp(ssid, s) == 0) {
+                strncpy(out_password, p, out_size - 1);
+                out_password[out_size - 1] = '\0';
+                fclose(f);
+                return true;
+            }
+        }
+    }
+
+    fclose(f);
+    return false;
+}
+
+
+
 void wifi_init_ap_sta(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -305,6 +347,8 @@ void wifi_init_ap_sta(void)
 
     ESP_LOGI(TAG, "WiFi initialized in STA mode, connected to home network");
 }
+
+
 
 
 const char* get_auth_mode_name(uint8_t authmode)

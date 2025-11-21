@@ -35,6 +35,10 @@ typedef struct {
     char *content;
 } attack_status_t;
 
+bool get_password_for_ssid(const char *ssid, char *out_password, size_t out_size);
+
+void init_fs();
+
 /**
  * @brief Initializes the Wi-Fi in AP+STA mode.
  * This registers event handlers and sets up the network interfaces.

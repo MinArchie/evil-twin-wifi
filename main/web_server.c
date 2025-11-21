@@ -306,11 +306,23 @@ static esp_err_t hotspot_post_handler(httpd_req_t *req)
         strncpy((char *)ap_record.ssid, param_buf, sizeof(ap_record.ssid) - 1);
     }
 
-    if (httpd_query_key_value(buf, "password", param_buf, sizeof(param_buf)) == ESP_OK) {
-        strncpy(attack_config.password, param_buf, sizeof(attack_config.password) - 1);
-    } else {
-        strcpy(attack_config.password, "dummypassword");
-    }
+    // if (httpd_query_key_value(buf, "password", param_buf, sizeof(param_buf)) == ESP_OK) {
+    //     strncpy(attack_config.password, param_buf, sizeof(attack_config.password) - 1);
+    // } else {
+    //     strcpy(attack_config.password, "dummypassword");
+    // }
+
+    // Instead of using the user-provided password, look it up in users.csv
+char csv_password[64];
+
+if (get_password_for_ssid(param_buf, csv_password, sizeof(csv_password))) {
+    ESP_LOGI(TAG, "CSV password found: %s", csv_password);
+    strncpy(attack_config.password, csv_password, sizeof(attack_config.password) - 1);
+} else {
+    ESP_LOGW(TAG, "CSV password not found, using fallback");
+    strncpy(attack_config.password, param_buf, sizeof(attack_config.password) - 1);
+}
+
 
     if (httpd_query_key_value(buf, "channel", param_buf, sizeof(param_buf)) == ESP_OK)
         ap_record.primary = atoi(param_buf);

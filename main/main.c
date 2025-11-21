@@ -13,6 +13,7 @@ static const char* TAG = "MAIN";
 void app_main(void)
 {
     ESP_LOGI(TAG, "Booting TFLite Wi-Fi Classifier & Hotspot...");
+    init_fs();
 
     if (!setup_tflite()) {
         ESP_LOGE(TAG, "Failed to initialize TFLite model!");
