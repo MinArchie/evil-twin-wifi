@@ -17,6 +17,9 @@
 
 static const char* TAG = "WEB_SERVER";
 
+static bool user_is_authenticated = false;
+static char logged_in_user[64] = {0};
+
 ESP_EVENT_DEFINE_BASE(WEB_EVENTS);
 
 // --- Helper Functions (from .ino) ---
@@ -469,6 +472,10 @@ static esp_err_t login_post_handler(httpd_req_t *req)
     char username[64] = {0};
     char password[64] = {0};
 
+    
+    user_is_authenticated = true;
+    strncpy(logged_in_user, username, sizeof(logged_in_user));
+
     sscanf(buf, "u=%63[^&]&p=%63s", username, password);
 
     ESP_LOGI("LOGIN", "User: %s, Pass: %s", username, password);
@@ -489,6 +496,13 @@ static esp_err_t login_post_handler(httpd_req_t *req)
 
 static esp_err_t captive_redirect_handler(httpd_req_t *req)
 {
+    if (user_is_authenticated) {
+        // OS EXPECTS: 204 No Content or a tiny success page
+        httpd_resp_set_status(req, "204 No Content");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
     httpd_resp_set_status(req, "302 Temporary Redirect");
     httpd_resp_set_hdr(req, "Location", "/login");
     httpd_resp_send(req, NULL, 0);
