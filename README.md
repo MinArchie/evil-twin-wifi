@@ -1,18 +1,24 @@
-# Evil Twin Wi-Fi — ESP32 Security Research Tool
 
-A bare-metal embedded security tool that runs an on-device neural network to classify Wi-Fi network risk, then enables targeted wifi deauthentication and cloning attacks — all controlled from a browser-based dashboard served directly by the ESP32.
+# Evil Twin Wi-Fi — ESP32 Master Controller
+
+One half of a two-board 802.11 security research platform. This board runs an on-device neural network to classify nearby Wi-Fi networks, hosts a rogue access point (evil twin), and commands a dedicated deauth board over UART.
 
 Built with **C/C++**, **ESP-IDF**, and **TensorFlow Lite Micro**.
 
+> **Companion board:** [uart-slave](https://github.com/MinArchie/uart-slave) — receives BSSID commands over UART and fires raw 802.11 deauthentication frames independently.
+
 ---
 
-## What it does
+## What this board does
 
-- **Scans & classifies nearby networks** using a TFLite Micro neural network running on-chip, rating each access point as *Good*, *Medium*, or *Risky* based on signal strength, auth mode, and SSID visibility
-- **Evil twin AP** — clones a target network's SSID, BSSID, channel, and auth mode to stand up a rogue access point
-- **Deauthentication attacks** — injects raw IEEE 802.11 deauth frames via a WSL security layer bypass, periodically broadcasting to disconnect clients from a target AP
-- **AP+STA dual mode** — simultaneously connects to an upstream network and runs its own access point, so the control dashboard is reachable over Wi-Fi without additional hardware
-- **Browser dashboard** — on-device HTTP server (ESP-IDF `httpd`) serves a live scan table with per-network risk badges and one-click clone/deauth actions
+- **Scans & classifies nearby networks** — a TFLite Micro neural network running on-chip rates each AP as *Good*, *Medium*, or *Risky* using signal strength, auth mode, and SSID visibility
+- **Evil twin AP** — clones a target network's SSID, BSSID, channel, and auth configuration
+- **UART deauth trigger** — on user action, serializes the target BSSID into a framed UART message and dispatches it to the slave board
+- **AP+STA dual mode** — simultaneously connects to an upstream network and runs its own AP so the dashboard stays reachable
+- **Browser dashboard** — on-device HTTP server serves a live scan table with per-network risk badges and one-click clone/deauth actions
+
+
+---
 
 ## Architecture
 
@@ -48,6 +54,11 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 Once running, connect to the ESP32's AP and navigate to its IP in a browser.
 
+---
+
+## Why two boards
+
+An ESP32 radio can't simultaneously run a stable access point and inject raw management frames on a target channel. Board 1 handles scanning, the evil twin AP, and the control interface. Board 2 handles continuous deauth injection — triggered by UART from this board — without disrupting AP operation.
 ---
 
 > **For authorized security research and educational use only.**
