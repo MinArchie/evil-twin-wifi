@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "../ap_scanner.h"
+#include "../sniffer.h"
 
 #include "esp_wifi_types.h"
 
@@ -84,4 +85,18 @@ void wifictl_get_sta_mac(uint8_t *mac_sta);
  * @param channel channel in range 1 - 13
  */
 void wifictl_set_channel(uint8_t channel);
+
+void wifictl_set_target_bssid(const uint8_t *bssid);
+void wifictl_clear_target_bssid(void);
+void wifictl_track_client(const uint8_t *ap_bssid, const uint8_t *sta_mac);
+void wifictl_untrack_client(const uint8_t *mac);
+void wifictl_deauth_tracked_clients(const uint8_t *ap_bssid);
+void wifictl_clear_tracked_clients_for_bssid(const uint8_t *bssid);
+void wifictl_clear_all_tracked_clients(void);
+void wifictl_whitelist_mac(const uint8_t *mac);
+void wifictl_remove_whitelist_mac(const uint8_t *mac);
+bool wifictl_is_target_set(void);
+void wifictl_get_target_bssid(uint8_t *out_bssid /* 6 bytes buffer */);
+void wifictl_stop_sniffer_and_clear_target(void);
+
 #endif

