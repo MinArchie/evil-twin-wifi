@@ -290,6 +290,13 @@ static esp_err_t hotspot_get_handler(httpd_req_t *req)
 
 static esp_err_t hotspot_post_handler(httpd_req_t *req)
 {
+    if (!user_is_authenticated) {
+        httpd_resp_set_status(req, "302 Found");
+        httpd_resp_set_hdr(req, "Location", "/login");
+        httpd_resp_send(req, NULL, 0);
+        return ESP_OK;
+    }
+
     char buf[512];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
     if (ret <= 0) {
@@ -343,6 +350,7 @@ static esp_err_t hotspot_post_handler(httpd_req_t *req)
 // Replaces handleClone()
 static esp_err_t clone_get_handler(httpd_req_t *req)
 {
+
     size_t buf_len = httpd_req_get_url_query_len(req) + 1;
     if (buf_len <= 1) return ESP_FAIL; // No query
 
